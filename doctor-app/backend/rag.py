@@ -1,8 +1,13 @@
 import requests
 import json
+import logging
 from sqlalchemy.orm import Session, joinedload
 import models
 from config import settings
+
+
+logger = logging.getLogger(__name__)
+
 
 def get_context(db: Session, user: models.User = None):
     # Fetch doctors with their specialization and user details
@@ -51,6 +56,85 @@ def get_context(db: Session, user: models.User = None):
 
     return context_text
 
+
+def extract_booking_intent(message: str) -> dict:
+    """
+    Use the LLM strictly as an intent extractor.
+
+    Expected JSON format:
+    {
+      "intent": "book_appointment" | "none",
+      "doctor_name": null | string,
+      "specialization": null | string,
+      "date": null | "YYYY-MM-DD",
+      "day_of_week": null | string,
+      "time": null | "HH:MM",
+      "part_of_day": null | "morning" | "afternoon" | "evening"
+    }
+    """
+    OLLAMA_URL = "http://localhost:11434/api/chat"
+    MODEL = "gemma3:4b"
+
+    system_prompt = """
+You are an intent extraction engine for a doctor appointment chatbot.
+
+Your ONLY task is to analyse the user's single message and extract structured intent.
+
+Very important rules:
+- You MUST respond with JSON ONLY. No explanations, no prose, no markdown.
+- Use EXACTLY this JSON shape with all keys present:
+  {
+    "intent": "book_appointment" | "none",
+    "doctor_name": null | string,
+    "specialization": null | string,
+    "date": null | "YYYY-MM-DD",
+    "day_of_week": null | string,
+    "time": null | "HH:MM",
+    "part_of_day": null | "morning" | "afternoon" | "evening"
+  }
+- If the user clearly wants to book a medical appointment, set "intent" to "book_appointment".
+- Otherwise set "intent" to "none".
+- NEVER make up or guess doctors, specializations, dates or times.
+  - Only use a doctor or specialization name if the user explicitly mentioned it.
+  - Only use a date or time if the user explicitly mentioned it.
+  - If you are not sure about a field, set it to null.
+- If the user says things like "tomorrow", "next Monday", "today", set "day_of_week" accordingly, not "date".
+- If the user mentions morning/afternoon/evening, set "part_of_day" accordingly.
+"""
+
+    default = {
+        "intent": "none",
+        "doctor_name": None,
+        "specialization": None,
+        "date": None,
+        "day_of_week": None,
+        "time": None,
+        "part_of_day": None,
+    }
+
+    try:
+        payload = {
+            "model": MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message},
+            ],
+            "stream": False,
+        }
+        response = requests.post(OLLAMA_URL, json=payload)
+        response.raise_for_status()
+        body = response.json()
+        content = body.get("message", {}).get("content", "")
+        intent_data = json.loads(content)
+        # Ensure all required keys exist, fall back to defaults if not.
+        merged = {**default, **{k: intent_data.get(k) for k in default.keys() if isinstance(intent_data, dict)}}
+        logger.info("Extracted booking intent: %s", merged)
+        return merged
+    except Exception as e:  # pragma: no cover - safety net
+        logger.error("Intent extraction error: %s", e)
+        return default
+
+
 def ask_bot(query: str, db: Session, user: models.User = None):
     # Ollama settings
     OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -59,12 +143,12 @@ def ask_bot(query: str, db: Session, user: models.User = None):
     
     db_context = get_context(db, user)
     
-    instruction = "If you recommend a doctor or suggest booking an appointment, append the tag [BOOK_NOW] at the end of your response."
+    instruction = "If the user is a patient, you may recommend suitable doctors from the list based on their symptoms and encourage them to book an appointment."
     if user and user.role in ["doctor", "admin"]:
         instruction = "Do not suggest booking an appointment as this user is a staff member. Focus on answering their query."
-
+    
     system_prompt = f"""You are a helpful medical assistant for the DoctorBook app.
-        Your goal is to help users find the right doctor and encourage them to book an appointment.
+        Your goal is to help users find the right doctor and answer their questions using the provided context.
         
         You are chatting with {user.full_name if user else 'a guest'}. Use the provided context to answer questions about their specific appointments or schedule if available.
         
@@ -95,6 +179,7 @@ def ask_bot(query: str, db: Session, user: models.User = None):
         print(f"Ollama Error: {e}")
         return "Sorry, I'm having trouble connecting to the local Ollama service. Please ensure Ollama is running."
 
+
 def ask_bot_stream(query: str, db: Session, user: models.User = None):
     # Ollama settings
     OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -103,12 +188,12 @@ def ask_bot_stream(query: str, db: Session, user: models.User = None):
     
     db_context = get_context(db, user)
     
-    instruction = "If you recommend a doctor or suggest booking an appointment, append the tag [BOOK_NOW] at the end of your response."
+    instruction = "If the user is a patient, you may recommend suitable doctors from the list based on their symptoms and encourage them to book an appointment."
     if user and user.role in ["doctor", "admin"]:
         instruction = "Do not suggest booking an appointment as this user is a staff member. Focus on answering their query."
-
+    
     system_prompt = f"""You are a helpful medical assistant for the DoctorBook app.
-        Your goal is to help users find the right doctor and encourage them to book an appointment.
+        Your goal is to help users find the right doctor and answer their questions using the provided context.
         
         You are chatting with {user.full_name if user else 'a guest'}. Use the provided context to answer questions about their specific appointments or schedule if available.
         

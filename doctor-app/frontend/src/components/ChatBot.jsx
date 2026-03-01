@@ -1,12 +1,9 @@
 // c:\Users\rkris\Downloads\doctor-app\doctor-app\frontend\src\components\ChatBot.jsx
 import { useState, useRef, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { chatAPI } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 
 export default function ChatBot() {
   const { user } = useAuth()
-  const navigate = useNavigate()
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState([
     { role: 'bot', text: 'Hi! I can help you find a doctor. What are you looking for?' }
@@ -120,13 +117,8 @@ export default function ChatBot() {
 
           {/* Messages */}
           <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12, backgroundColor: '#f9fafb' }}>
-            {messages.map((msg, idx) => {
-              const hasButton = msg.text.includes('[BOOK_NOW]')
-              const displayText = msg.text.replace('[BOOK_NOW]', '')
-              // Only show the booking button to patients (or guests who need to login)
-              const showButton = hasButton && (!user || user.role === 'patient')
-              return (
-                <div key={idx} style={{
+            {messages.map((msg, idx) => (
+              <div key={idx} style={{
                 alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
                 maxWidth: '80%',
                 padding: '10px 14px',
@@ -137,25 +129,9 @@ export default function ChatBot() {
                 fontSize: 14,
                 lineHeight: 1.4
               }}>
-                {displayText}
-                {showButton && (
-                  <button
-                    onClick={() => {
-                      setIsOpen(false)
-                      navigate('/doctors')
-                    }}
-                    style={{
-                      display: 'block', marginTop: 10, padding: '8px 12px',
-                      backgroundColor: 'var(--teal)', color: 'white',
-                      border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 12,
-                      width: '100%'
-                    }}
-                  >
-                    Book Appointment
-                  </button>
-                )}
+                {msg.text}
               </div>
-            )})}
+            ))}
             {loading && (
               <div style={{ alignSelf: 'flex-start', padding: '8px 12px', backgroundColor: 'white', borderRadius: 12, fontSize: 12, color: '#666' }}>
                 Typing...

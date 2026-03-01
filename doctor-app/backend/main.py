@@ -6,6 +6,7 @@ from sqlalchemy import text
 from datetime import timedelta, datetime
 from typing import List, Optional
 import threading
+import logging
 
 from database import get_db, engine
 import models
@@ -21,7 +22,10 @@ from email_utils import (
     send_cancellation_email,
     send_prescription_email,
 )
+from services.booking_service import resolve_slot_from_intent, book_slot_transactionally
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -599,22 +603,106 @@ def all_appointments(
 
 # ─── CHAT BOT ─────────────────────────────────────────────────────────────────
 
+def _single_message_stream(message: str):
+    yield message
+
+
 @app.post("/chat", response_model=schemas.ChatResponse)
 def chat_with_bot(
     data: schemas.ChatRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    response_text = rag.ask_bot(data.message, db, current_user)
-    return schemas.ChatResponse(response=response_text)
+    # Preserve existing behavior for non-patient roles.
+    if current_user.role != models.UserRole.patient:
+        response_text = rag.ask_bot(data.message, db, current_user)
+        return schemas.ChatResponse(response=response_text)
+
+    # For patients, first try to detect booking intent.
+    intent = rag.extract_booking_intent(data.message)
+    logger.info("Chat intent for user %s: %s", current_user.id, intent)
+
+    if intent.get("intent") != "book_appointment":
+        response_text = rag.ask_bot(data.message, db, current_user)
+        return schemas.ChatResponse(response=response_text)
+
+    # Booking intent: resolve slot and book transactionally.
+    resolution = resolve_slot_from_intent(db, current_user, intent)
+    logger.info("Slot resolution result for user %s: %s", current_user.id, resolution)
+
+    if resolution["status"] == "slot_selected" and resolution.get("slot") is not None:
+        slot = resolution["slot"]
+        booking_result = book_slot_transactionally(
+            db=db,
+            user=current_user,
+            slot_id=slot.id,
+            reason=None,
+            background_tasks=background_tasks,
+        )
+        logger.info("Booking transaction result for user %s: %s", current_user.id, booking_result)
+
+        if not booking_result.get("success"):
+            return schemas.ChatResponse(response=booking_result.get("message") or "Unable to book that slot.")
+
+        confirmation_text = (
+            f"Your appointment with Dr. {booking_result['doctor_name']} "
+            f"({booking_result['specialization']}) is confirmed for "
+            f"{booking_result['date']} at {booking_result['time']}. "
+            f"Appointment ID: {booking_result['appointment_id']}."
+        )
+        return schemas.ChatResponse(response=confirmation_text)
+
+    # Any non-terminal resolution returns its clarification or error message.
+    message = resolution.get("message") or "Sorry, I couldn't book that appointment. Please try again."
+    return schemas.ChatResponse(response=message)
+
 
 @app.post("/chat/stream")
 def chat_with_bot_stream(
     data: schemas.ChatRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    return StreamingResponse(rag.ask_bot_stream(data.message, db, current_user), media_type="text/plain")
+    # Non-patients: preserve existing streaming chatbot behavior.
+    if current_user.role != models.UserRole.patient:
+        return StreamingResponse(rag.ask_bot_stream(data.message, db, current_user), media_type="text/plain")
+
+    # Patients: attempt booking intent extraction first.
+    intent = rag.extract_booking_intent(data.message)
+    logger.info("Chat (stream) intent for user %s: %s", current_user.id, intent)
+
+    if intent.get("intent") != "book_appointment":
+        return StreamingResponse(rag.ask_bot_stream(data.message, db, current_user), media_type="text/plain")
+
+    resolution = resolve_slot_from_intent(db, current_user, intent)
+    logger.info("Slot (stream) resolution result for user %s: %s", current_user.id, resolution)
+
+    if resolution["status"] == "slot_selected" and resolution.get("slot") is not None:
+        slot = resolution["slot"]
+        booking_result = book_slot_transactionally(
+            db=db,
+            user=current_user,
+            slot_id=slot.id,
+            reason=None,
+            background_tasks=background_tasks,
+        )
+        logger.info("Booking (stream) transaction result for user %s: %s", current_user.id, booking_result)
+
+        if not booking_result.get("success"):
+            msg = booking_result.get("message") or "Unable to book that slot."
+        else:
+            msg = (
+                f"Your appointment with Dr. {booking_result['doctor_name']} "
+                f"({booking_result['specialization']}) is confirmed for "
+                f"{booking_result['date']} at {booking_result['time']}. "
+                f"Appointment ID: {booking_result['appointment_id']}."
+            )
+    else:
+        msg = resolution.get("message") or "Sorry, I couldn't book that appointment. Please try again."
+
+    return StreamingResponse(_single_message_stream(msg), media_type="text/plain")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # USERS (admin)
