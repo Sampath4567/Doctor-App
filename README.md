@@ -1,75 +1,72 @@
-# 🏥 DoctorBook — Full-Stack Appointment System
+# DoctorBook - Version v1.0.0-rag
 
-A production-ready doctor appointment booking system built with **FastAPI** + **React** + **MySQL**, featuring role-based access, slot management, conflict prevention, and email notifications.
+DoctorBook is a full-stack doctor appointment platform with role-based access, slot management, email notifications, and an AI chat assistant with booking intent support.
 
----
+This README is written for the repository snapshot `doctor-appV2.0-RAG` (March 2026).
 
-## 📁 Project Structure
+## Tech Stack
 
-```
+- Backend: FastAPI, SQLAlchemy, MySQL, JWT auth
+- Frontend: React (Vite), React Router, Axios
+- AI: Ollama local LLM integration for chat and booking intent extraction
+- Notifications: SMTP email (Gmail app password supported)
+
+## Version Scope
+
+- Repository release: `v2.0.0-rag`
+- Backend API title/version: `DoctorBook API` / `1.0.0` (from FastAPI app metadata)
+- Includes: AI chat endpoints (`/chat`, `/chat/stream`) and appointment booking flow
+
+## Project Structure
+
+```text
 doctor-app/
-├── backend/
-│   ├── main.py            # All API routes
-│   ├── models.py          # SQLAlchemy ORM models
-│   ├── schemas.py         # Pydantic request/response schemas
-│   ├── database.py        # MySQL connection
-│   ├── auth.py            # JWT authentication
-│   ├── email_utils.py     # SMTP email notifications
-│   ├── config.py          # Settings from .env
-│   ├── requirements.txt
-│   └── .env.example
-└── frontend/
-    ├── src/
-    │   ├── App.jsx              # Router + Auth shell
-    │   ├── index.css            # Design system
-    │   ├── context/
-    │   │   └── AuthContext.jsx  # Global auth state
-    │   ├── services/
-    │   │   └── api.js           # Axios API client
-    │   ├── components/
-    │   │   └── Navbar.jsx
-    │   └── pages/
-    │       ├── LoginPage.jsx
-    │       ├── RegisterPage.jsx
-    │       ├── DoctorsPage.jsx       # Browse + book
-    │       ├── AppointmentsPage.jsx  # View + cancel
-    │       ├── MySlotsPage.jsx       # Doctor slot mgmt
-    │       └── AdminPage.jsx         # Admin dashboard
-    ├── package.json
-    ├── vite.config.js
-    └── index.html
+|-- backend/
+|   |-- main.py
+|   |-- rag.py
+|   |-- auth.py
+|   |-- config.py
+|   |-- database.py
+|   |-- email_utils.py
+|   |-- models.py
+|   |-- schemas.py
+|   |-- requirements.txt
+|   `-- .env.example
+|-- frontend/
+|   |-- src/
+|   |-- package.json
+|   `-- vite.config.js
+`-- README.md
 ```
 
----
+## Prerequisites
 
-## 🚀 Setup & Run
+- Python 3.10+
+- Node.js 18+
+- MySQL 8+
+- Optional for AI chat: Ollama running locally at `http://localhost:11434`
 
-### 1. MySQL Database
+## Setup
+
+### 1. Create database
 
 ```sql
 CREATE DATABASE doctor_app CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-### 2. Backend
+### 2. Backend setup
 
 ```bash
 cd backend
-
-# Copy and edit environment variables
 cp .env.example .env
-# Edit .env with your MySQL credentials and SMTP settings
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Start server (tables are auto-created on first run)
 uvicorn main:app --reload
 ```
 
-Backend runs at: http://localhost:8000  
-Interactive API docs: http://localhost:8000/docs
+Backend default URL: `http://localhost:8000`
+Swagger docs: `http://localhost:8000/docs`
 
-### 3. Frontend
+### 3. Frontend setup
 
 ```bash
 cd frontend
@@ -77,106 +74,59 @@ npm install
 npm run dev
 ```
 
-Frontend runs at: http://localhost:5173
+Frontend default URL: `http://localhost:5173`
 
----
+## Environment Variables
 
-## ⚙️ Environment Variables
+Use `backend/.env.example` as the template. Never commit real secrets.
 
-```env
-# MySQL
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=doctor_app
-DB_USER=root
-DB_PASSWORD=your_password
+Required keys:
 
-# JWT (change in production!)
-SECRET_KEY=your-secret-key-min-32-chars
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=60
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
+- `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`
+- `EMAIL_FROM`, `EMAIL_FROM_NAME`
+- `FRONTEND_URL`
+- `LLM_PROVIDER` (default currently set to `ollama`)
 
-# Gmail SMTP (use App Password, not your real password)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your_email@gmail.com
-SMTP_PASSWORD=xxxx xxxx xxxx xxxx   # Google App Password
-EMAIL_FROM=your_email@gmail.com
-EMAIL_FROM_NAME=DoctorBook
+Optional keys:
 
-FRONTEND_URL=http://localhost:5173
+- `GOOGLE_API_KEY`
+- `OPENAI_API_KEY`
+
+## API Overview
+
+Main endpoint groups:
+
+- Auth: `/auth/register`, `/auth/login`, `/auth/me`
+- Specializations: CRUD endpoints for admin/public listing
+- Doctors: list, details, admin create/update
+- Slots: single and bulk slot management
+- Appointments: create, list, cancel, complete
+- Users: admin user listing
+- Chat: `/chat`, `/chat/stream`
+
+## Security and Git Hygiene
+
+This repo now includes a root `.gitignore` to keep sensitive and local-only files out of commits:
+
+- `.env` and secret variants
+- Python virtual environments and caches
+- `node_modules`
+- build outputs and logs
+- IDE local settings
+
+Before first push, verify what will be committed:
+
+```bash
+git init
+git add .
+git status
 ```
 
-> **Gmail setup**: Enable 2FA → Google Account → Security → App Passwords → Generate password
+If any secret file still appears in staged files, unstage it and extend `.gitignore`.
 
----
+## Notes
 
-## 👥 User Roles
-
-| Role    | Capabilities |
-|---------|-------------|
-| **Patient** | Register, browse doctors by specialization, book/cancel appointments |
-| **Doctor**  | Register, add/delete their own slots (30 min), view their appointments |
-| **Admin**   | Add specializations, create doctor profiles, view all users/appointments |
-
----
-
-## 🔑 First-Time Admin Setup
-
-1. Register a user normally
-2. Manually update their role in MySQL:
-```sql
-UPDATE users SET role = 'admin' WHERE username = 'your_username';
-```
-
----
-
-## 📡 Key API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/auth/register` | Register user |
-| POST | `/auth/login` | Login, returns JWT |
-| GET | `/doctors` | List doctors (filter by `?specialization_id=`) |
-| GET | `/doctors/{id}/slots` | Get slots (`?available_only=true`) |
-| POST | `/doctors/{id}/slots` | Add slot (doctor/admin) |
-| DELETE | `/doctors/{id}/slots/{sid}` | Delete unbooked slot |
-| POST | `/appointments` | Book an appointment |
-| GET | `/appointments/my` | My appointments (role-aware) |
-| PUT | `/appointments/{id}/cancel` | Cancel appointment |
-| GET | `/specializations` | List all specializations |
-| POST | `/specializations` | Create specialization (admin) |
-
----
-
-## ✉️ Email Notifications
-
-Emails are sent in the **background** (non-blocking) for:
-- **Patient**: Booking confirmation with full appointment details
-- **Doctor**: New patient booking notification  
-- **Both**: Cancellation notification
-
----
-
-## 🛡️ Key Features
-
-- ✅ **JWT Auth** with role-based route protection
-- ✅ **Slot conflict prevention** — 409 Conflict if slot already booked
-- ✅ **30-minute slots** auto-calculated from start time
-- ✅ **Background email tasks** — booking never delayed by email
-- ✅ **Password hashing** with bcrypt
-- ✅ **Eager loading** for related models (no N+1 queries)
-- ✅ **CORS** configured for local dev and production
-
----
-
-## 🎨 Frontend Pages
-
-| URL | Page | Role |
-|-----|------|------|
-| `/login` | Sign in | All |
-| `/register` | Create account | All |
-| `/doctors` | Browse & book | Patient, Admin |
-| `/appointments` | View & cancel | All |
-| `/my-slots` | Manage slots | Doctor |
-| `/admin` | Full dashboard | Admin |
+- Gmail SMTP should use an App Password, not the account login password.
+- AI chat features require a running local Ollama instance and available model.
